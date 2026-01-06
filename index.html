@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Simulador Three.js - 3 Chunks de Terreno</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #000;
+        font-family: monospace;
+      }
+      #ui-container {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        pointer-events: none;
+      }
+      #info {
+        color: white;
+        text-shadow: 1px 1px 2px black;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 15px;
+        border-radius: 10px;
+      }
+      .key {
+        color: #ffff00;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui-container">
+      <div id="info">
+        <h2>COMANDOS</h2>
+        <p><span class="key">Q / E</span> : Ailerons</p>
+        <p><span class="key">A / D</span> : Leme</p>
+        <p><span class="key">W / S</span> : Elevadores</p>
+      </div>
+    </div>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <script type="module" src="./script.js"></script>
+  </body>
+</html>
