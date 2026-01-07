@@ -3,31 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <title>Simulador Three.js - 3 Chunks de Terreno</title>
-    <style>
-      body {
-        margin: 0;
-        overflow: hidden;
-        background-color: #000;
-        font-family: monospace;
-      }
-      #ui-container {
-        position: absolute;
-        top: 20px;
-        left: 20px;
-        pointer-events: none;
-      }
-      #info {
-        color: white;
-        text-shadow: 1px 1px 2px black;
-        background: rgba(0, 0, 0, 0.5);
-        padding: 15px;
-        border-radius: 10px;
-      }
-      .key {
-        color: #ffff00;
-        font-weight: bold;
-      }
-    </style>
+    <link rel="stylesheet" href="main.css" />
   </head>
   <body>
     <div id="ui-container">
@@ -36,6 +12,42 @@
         <p><span class="key">Q / E</span> : Ailerons</p>
         <p><span class="key">A / D</span> : Leme</p>
         <p><span class="key">W / S</span> : Elevadores</p>
+        <h2>OBJETIVOS</h2>
+        <p><span class="key">Mouse 1</span> : Adicionar Objetivo</p>
+        <p>
+          <span class="key">OBJETIVOS CONCLUÍDOS</span> :
+          <span id="objectiveLabel">0</span>
+        </p>
+      </div>
+      <p>Pitch: <span id="pitchVal"></span></p>
+      <p>Roll: <span id="rollVal"></span></p>
+      <p>Heading: <span id="headingVal"></span></p>
+    </div>
+    <div id="hud-container">
+      <div id="heading-tape-container">
+        <div id="heading-tape"></div>
+        <div id="heading-marker">▼</div>
+      </div>
+
+      <div id="horizon-circle">
+        <div id="horizon-disk">
+          <div class="sky"></div>
+          <div class="ground"></div>
+          <div id="pitch-ladder"></div>
+        </div>
+
+        <div id="aircraft-fixed-pointer">
+          <span class="wing-l"></span><span class="nose"></span
+          ><span class="wing-r"></span>
+        </div>
+        <div id="pitch-readout">0°</div>
+      </div>
+
+      <div class="data-box" style="right: 20px">
+        Velocidade: <span id="speedVal">0</span>
+      </div>
+      <div class="data-box" style="right: 20px; top: 60%">
+        Altitude: <span id="altVal">0</span>
       </div>
     </div>
 

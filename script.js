@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GUI } from "three/addons/libs/lil-gui.module.min.js";
+const euler = new THREE.Euler();
 
 // =========================================================
 // 1. CONFIGURAÇÃO GLOBAL
@@ -12,9 +13,14 @@ const config = {
   tailZ: 2.415, // Distância da cauda
   motorZ: -3.1, // Posição do motor
   coneZ: -0.029, // Ajuste fino do nariz
-  enginePower: 50, // Potência do motor (afeta velocidade)
-  wireframe: false, // Modo de visualização em linhas
+  enginePower: 50, // Potência do motor
+  wireframe: false, // Modo de wireframe
 };
+
+// Dados de Telemetria
+let pitchVal = 0;
+let rollVal = 0;
+let hdgVal = 0;
 
 // Offsets para ajustar o pivot das peças móveis
 const OFFSET_AILERON = 0.8;
@@ -66,7 +72,7 @@ scene.environment = texture; // O céu reflete nos materiais metálicos
 // Iluminação
 scene.add(new THREE.AmbientLight(0xffffff, 0.4));
 const dirLight = new THREE.DirectionalLight(0xffffff, 1.8); // Sol
-dirLight.position.set(50, 100, 50);
+dirLight.position.set(50, 500, 50);
 dirLight.castShadow = true;
 
 // Configuração da área de sombra
@@ -257,7 +263,7 @@ function createChunk(offsetX, offsetZ) {
   const mesh = new THREE.Mesh(geometry, terrainMat);
   mesh.userData = { offsetX, offsetZ }; // Guarda coordenadas originais
   updateChunkGeometry(mesh, offsetX, offsetZ);
-
+  mesh.receiveShadow = true;
   scene.add(mesh);
   chunks.push(mesh);
   return mesh;
@@ -332,7 +338,7 @@ fCtrl.add(config, "enginePower", 15, 100).name("Potência %");
 fCtrl.add(config, "wireframe").onChange((v) => (matBody.wireframe = v));
 
 // =========================================================
-// 7. LÓGICA DE CONTROLO E LOOP DE ANIMAÇÃO
+// 7. LÓGICA DE CONTROLO
 // =========================================================
 const keys = { q: false, e: false, a: false, d: false, w: false, s: false };
 let isFirstPerson = false;
@@ -367,103 +373,368 @@ window.addEventListener("resize", () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// =========================================================
+// 8. LÓGICA DE COLISÃO ATUALIZADA
+// =========================================================
+// --- SISTEMA DE PARTÍCULAS (FOGO E FUMO) ---
+const particles = [];
+const particleGroup = new THREE.Group();
+scene.add(particleGroup);
+
+const particleGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+
+let isCrashed = false;
+
+function createExplosion(position) {
+  const particleCount = 40;
+
+  for (let i = 0; i < particleCount; i++) {
+    // Escolher aleatoriamente se é fogo ou fumo
+    const isFire = Math.random() > 0.4;
+    const color = isFire
+      ? Math.random() > 0.5
+        ? 0xff4500
+        : 0xffa500
+      : 0x555555;
+
+    const mat = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.8,
+    });
+
+    const particle = new THREE.Mesh(particleGeometry, mat);
+
+    // Posição inicial (onde o avião bateu)
+    particle.position.copy(position);
+
+    // Velocidade aleatória (explosão para cima e para os lados)
+    const velocity = new THREE.Vector3(
+      (Math.random() - 0.5) * 0.5,
+      Math.random() * 0.5,
+      (Math.random() - 0.5) * 0.5
+    );
+
+    particles.push({
+      mesh: particle,
+      velocity: velocity,
+      life: 1.0,
+      isFire: isFire,
+      decay: 0.01 + Math.random() * 0.02,
+    });
+
+    particleGroup.add(particle);
+  }
+}
+
+function checkCollision() {
+  if (isCrashed) return;
+
+  const currentTerrainHeight = getTerrainHeight(
+    airplane.position.x,
+    airplane.position.z
+  );
+
+  if (airplane.position.y < currentTerrainHeight + 0.5) {
+    isCrashed = true;
+
+    // --- NOVO: Gatilho da Explosão ---
+    createExplosion(airplane.position);
+
+    config.enginePower = 0;
+
+    setTimeout(() => {
+      resetPlane();
+      particles.forEach((p) => particleGroup.remove(p.mesh));
+      particles.length = 0;
+    }, 2000);
+  }
+}
+
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+
+    p.life -= p.decay;
+
+    // Mover a partícula
+    p.mesh.position.add(p.velocity);
+
+    if (p.isFire) {
+      // Fogo encolhe
+      p.mesh.scale.multiplyScalar(0.95);
+    } else {
+      // Fumo expande e fica transparente
+      p.mesh.scale.multiplyScalar(1.02);
+      p.mesh.material.opacity = p.life;
+    }
+
+    // Remover se a vida acabar
+    if (p.life <= 0) {
+      particleGroup.remove(p.mesh);
+      particles.splice(i, 1);
+    }
+  }
+}
+
+function resetPlane() {
+  airplane.position.y = 100;
+  airplane.rotation.set(0, 0, 0);
+  matBody.color.set(0xe74c3c);
+  config.enginePower = 50;
+  isCrashed = false;
+  roll = pitch = yaw = 0;
+}
+
+// --- SISTEMA DE OBJETIVOS ---
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let currentGoal = null;
+
+const goalMaterial = new THREE.MeshBasicMaterial({
+  color: 0x00ff00,
+  side: THREE.DoubleSide,
+});
+// Anel
+const goalGeometry = new THREE.TorusGeometry(5, 0.4, 16, 100);
+
+window.addEventListener("mousedown", (event) => {
+  mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+  mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+  //Atualizar o raio com a câmara e posição do rato
+  raycaster.setFromCamera(mouse, camera);
+
+  // Calcular interseções com os chunks gerados
+  const intersects = raycaster.intersectObjects(chunks);
+
+  if (intersects.length > 0) {
+    const point = intersects[0].point;
+
+    // Se já existe um objetivo, remove-o
+    if (currentGoal) scene.remove(currentGoal);
+
+    // Criar novo objetivo
+    currentGoal = new THREE.Mesh(goalGeometry, goalMaterial);
+
+    // Posicionar um pouco acima do chão
+    currentGoal.position.set(point.x, point.y + 40, point.z);
+
+    currentGoal.rotation.x = Math.PI;
+
+    scene.add(currentGoal);
+    console.log("Novo objetivo definido!");
+  }
+});
+
+let objectiveCount = 0;
+const objectiveLabel = document.getElementById("objectiveLabel");
+
+function checkGoalCollection() {
+  if (currentGoal) {
+    currentGoal.lookAt(airplane.position);
+
+    const distance = airplane.position.distanceTo(currentGoal.position);
+
+    if (distance < 10) {
+      objectiveCount += 1;
+
+      // Atualiza o texto no HTML
+      const label = document.getElementById("objectiveLabel");
+      if (label) label.innerText = objectiveCount;
+
+      console.log("Objetivo concluído!");
+
+      // Feedback visual (avião brilha)
+      matBody.emissive.set(0x00ff00);
+      setTimeout(() => matBody.emissive.set(0x000000), 500);
+
+      // Remove o objetivo atual
+      scene.remove(currentGoal);
+      currentGoal = null;
+    }
+  }
+}
+
+const clock = new THREE.Clock();
+let lastPos = new THREE.Vector3();
+
+// Atualizar Telemetria (hud, data boxes e heading tape)
+function updateTelemetry() {
+  const euler = new THREE.Euler().setFromQuaternion(airplane.quaternion, "YXZ");
+  const pitchDeg = THREE.MathUtils.radToDeg(euler.x);
+  const rollDeg = THREE.MathUtils.radToDeg(euler.z);
+  const headingDeg = (THREE.MathUtils.radToDeg(euler.y) + 360) % 360;
+
+  // Update dos valores
+  document.getElementById("pitch-readout").innerText =
+    Math.round(pitchDeg) + "°";
+  document.getElementById("pitchVal").innerText = Math.round(pitchDeg);
+  document.getElementById("rollVal").innerText = Math.round(rollDeg);
+  document.getElementById("headingVal").innerText = Math.round(headingDeg);
+
+  // Atualizar heading
+  const hdgOffset = -(headingDeg * 6);
+  document.getElementById(
+    "heading-tape"
+  ).style.transform = `translateX(${hdgOffset}px)`;
+
+  // Atualizar o horizonte artificial
+  const pitchMove = pitchDeg * 5;
+  const disk = document.getElementById("horizon-disk");
+  disk.style.transform = `rotate(${-rollDeg}deg) translateY(${pitchMove}px)`;
+
+  // Atualizar Velocidade e altitude
+  const dt = clock.getDelta();
+  if (dt > 0) {
+    const dist = airplane.position.distanceTo(lastPos);
+    document.getElementById("speedVal").innerText = Math.round((dist / dt) * 5);
+  }
+  lastPos.copy(airplane.position);
+  document.getElementById("altVal").innerText = Math.round(airplane.position.y);
+}
+
+// Inicialização do HUD (telemetria)
+function initHUD() {
+  const hdgTape = document.getElementById("heading-tape");
+  const pitchLadder = document.getElementById("pitch-ladder");
+
+  // Gerar rumos para heading
+  for (let j = 0; j < 2; j++) {
+    for (let i = 0; i < 36; i++) {
+      const unit = document.createElement("div");
+      unit.className = "hdg-unit";
+      unit.innerText = i * 10;
+      hdgTape.appendChild(unit);
+    }
+  }
+
+  // Gerar números para pitch - 90º em 90º
+  for (let i = -90; i <= 90; i += 10) {
+    if (i === 0) continue;
+    const line = document.createElement("div");
+    line.className = "pitch-line";
+
+    line.style.top = `${500 - i * 5}px`;
+
+    line.setAttribute("data-val", Math.abs(i));
+    pitchLadder.appendChild(line);
+  }
+}
+
 function animate() {
   requestAnimationFrame(animate);
 
-  // --- 1. PROCESSAR INPUTS ---
-  let tRoll = 0,
-    tYaw = 0,
-    tPitch = 0;
-  if (keys.q) tRoll = 1.0; // Rodar esquerda
-  if (keys.e) tRoll = -1.0; // Rodar direita
-  if (keys.a) tYaw = 0.5; // Leme esquerda
-  if (keys.d) tYaw = -0.5; // Leme direita
-  if (keys.s) tPitch = 0.6; // Nariz cima
-  if (keys.w) tPitch = -0.6; // Nariz baixo
+  // Estas funções correm SEMPRE
+  checkCollision();
+  updateParticles();
 
-  // --- 2. FÍSICA E ROTAÇÃO DO AVIÃO ---
-  // Lerp (Linear Interpolation) para suavizar a entrada (não muda instantaneamente)
-  roll = THREE.MathUtils.lerp(roll, tRoll, 0.04);
-  yaw = THREE.MathUtils.lerp(yaw, tYaw, 0.04);
-  pitch = THREE.MathUtils.lerp(pitch, tPitch, 0.04);
-  // Aplica as rotações ao grupo do avião
-  airplane.rotateY(yaw * 0.03);
-  airplane.rotateX(pitch * 0.03);
-  if (pitch > 0) {
+  // Apenas processamos controlos e movimento se não houver crash
+  if (!isCrashed) {
+    checkGoalCollection();
+    objectiveLabel.innerText = objectiveCount;
+    // --- 1. PROCESSAR INPUTS ---
+    let tRoll = 0,
+      tYaw = 0,
+      tPitch = 0;
+    if (keys.q) tRoll = 1.0; // Rodar esquerda
+    if (keys.e) tRoll = -1.0; // Rodar direita
+    if (keys.a) tYaw = 0.5; // Leme esquerda
+    if (keys.d) tYaw = -0.5; // Leme direita
+    if (keys.s) tPitch = 0.6; // Nariz cima
+    if (keys.w) tPitch = -0.6; // Nariz baixo
+
+    // --- 2. FÍSICA E ROTAÇÃO DO AVIÃO ---
+    // Lerp (Linear Interpolation) para suavizar o movimento
+    roll = THREE.MathUtils.lerp(roll, tRoll, 0.04);
+    yaw = THREE.MathUtils.lerp(yaw, tYaw, 0.04);
+    pitch = THREE.MathUtils.lerp(pitch, tPitch, 0.04);
+    // Aplica as rotações ao grupo do avião
+    airplane.rotateY(yaw * 0.03);
+    airplane.rotateX(pitch * 0.03);
+    if (pitch > 0) {
+      airplane.rotateZ(
+        PropTorqueFactor + (pitch / 200) * (config.enginePower / 30)
+      );
+      airplane.rotateY(
+        PropTorqueFactor / 10 + (pitch / 2000) * (config.enginePower / 30)
+      );
+    }
+    if (pitch < 0) {
+      airplane.rotateZ(
+        -PropTorqueFactor + (pitch / 2000) * (config.enginePower / 30)
+      );
+      airplane.rotateY(
+        -PropTorqueFactor / 40 + (pitch / 20000) * (config.enginePower / 30)
+      );
+    }
+
+    // Roll Base devido ao efeito do torque factor
     airplane.rotateZ(
-      PropTorqueFactor + (pitch / 200) * (config.enginePower / 30)
+      ((roll * 0.03 * 2) / config.wingScale) * (config.enginePower / 30)
+    ); // Consoante a potência e tamanho das asas, a autoridade dos ailerons muda
+
+    // --- 3. ANIMAÇÃO DAS PEÇAS MÓVEIS ---
+    smoothAileron = THREE.MathUtils.lerp(smoothAileron, tRoll, 0.1);
+    smoothRudder = THREE.MathUtils.lerp(smoothRudder, tYaw, 0.1);
+    smoothElevator = THREE.MathUtils.lerp(smoothElevator, tPitch, 0.1);
+
+    aileronL.rotation.x = -smoothAileron; // Ailerons movem-se em oposição
+    aileronR.rotation.x = smoothAileron;
+    rudder.rotation.y = -smoothRudder;
+    elevator.rotation.x = -smoothElevator;
+
+    // --- 4. FÍSICA DE MOVIMENTO ---
+    const power = config.enginePower / 100;
+    propellerGroup.rotation.z += -0.2 - power; // Rodar hélice
+
+    // Vetor do nariz
+    const forward = new THREE.Vector3(0, 0, -1);
+    forward.applyQuaternion(airplane.quaternion); // Aplica a rotação do avião ao vetor
+    forward.normalize();
+
+    const speed = 2.0 * power;
+    if (speed > 0) {
+      airplane.position.add(forward.multiplyScalar(speed)); // Move o avião nessa direção
+    }
+
+    // --- 5. LÓGICA DE CÂMARA ---
+    if (isFirstPerson) {
+      // Câmara "colada" ao cockpit
+      const cockpitOffset = new THREE.Vector3(0, 1, -3);
+      const targetPos = cockpitOffset.applyMatrix4(airplane.matrixWorld);
+      camera.position.lerp(targetPos, 0.5);
+      camera.quaternion.copy(airplane.quaternion); // Copia rotação do avião
+    } else {
+      // Câmara de perseguição (OrbitControls manual)
+      const planeDelta = new THREE.Vector3().subVectors(
+        airplane.position,
+        previousPlanePosition
+      );
+      camera.position.add(planeDelta); // Move a câmara junto com o avião
+      controls.target.copy(airplane.position); // Olha sempre para o avião
+      controls.update();
+    }
+
+    // --- 6. ATUALIZAÇÕES FINAIS ---
+    previousPlanePosition.copy(airplane.position); // Guarda posição para o próximo frame
+    updateTerrain(airplane.position); // Verifica terreno infinito
+
+    // Luz segue o avião
+    dirLight.position.set(
+      airplane.position.x + 50,
+      airplane.position.y + 300,
+      airplane.position.z + 50
     );
-    airplane.rotateY(
-      PropTorqueFactor / 10 + (pitch / 2000) * (config.enginePower / 30)
-    );
+    dirLight.target.position.copy(airplane.position);
+
+    dirLight.target.updateMatrixWorld();
+
+    updateTelemetry();
   }
-  if (pitch < 0) {
-    airplane.rotateZ(
-      -PropTorqueFactor + (pitch / 2000) * (config.enginePower / 30)
-    );
-    airplane.rotateY(
-      -PropTorqueFactor / 40 + (pitch / 20000) * (config.enginePower / 30)
-    );
-  }
-  console.log(pitch, yaw);
-  // Roll Base devido ao efeito do torque factor
-  airplane.rotateZ(
-    ((roll * 0.03 * 2) / config.wingScale) * (config.enginePower / 30)
-  ); // Consoante a potência e tamanho das asas, a autoridade dos ailerons muda
-
-  // --- 3. ANIMAÇÃO DAS PEÇAS MÓVEIS ---
-  smoothAileron = THREE.MathUtils.lerp(smoothAileron, tRoll, 0.1);
-  smoothRudder = THREE.MathUtils.lerp(smoothRudder, tYaw, 0.1);
-  smoothElevator = THREE.MathUtils.lerp(smoothElevator, tPitch, 0.1);
-
-  aileronL.rotation.x = -smoothAileron; // Ailerons movem-se em oposição
-  aileronR.rotation.x = smoothAileron;
-  rudder.rotation.y = -smoothRudder;
-  elevator.rotation.x = -smoothElevator;
-
-  // --- 4. FÍSICA DE MOVIMENTO ---
-  const power = config.enginePower / 100;
-  propellerGroup.rotation.z += -0.2 - power; // Rodar hélice
-
-  // Vetor do nariz
-  const forward = new THREE.Vector3(0, 0, -1);
-  forward.applyQuaternion(airplane.quaternion); // Aplica a rotação do avião ao vetor
-  forward.normalize();
-
-  const speed = 2.0 * power;
-  if (speed > 0) {
-    airplane.position.add(forward.multiplyScalar(speed)); // Move o avião nessa direção
-  }
-
-  // --- 5. LÓGICA DE CÂMARA ---
-  if (isFirstPerson) {
-    // Câmara "colada" ao cockpit
-    const cockpitOffset = new THREE.Vector3(0, 1, -3);
-    const targetPos = cockpitOffset.applyMatrix4(airplane.matrixWorld);
-    camera.position.lerp(targetPos, 0.5);
-    camera.quaternion.copy(airplane.quaternion); // Copia rotação do avião
-  } else {
-    // Câmara de perseguição (OrbitControls manual)
-    const planeDelta = new THREE.Vector3().subVectors(
-      airplane.position,
-      previousPlanePosition
-    );
-    camera.position.add(planeDelta); // Move a câmara junto com o avião
-    controls.target.copy(airplane.position); // Olha sempre para o avião
-    controls.update();
-  }
-
-  // --- 6. ATUALIZAÇÕES FINAIS ---
-  previousPlanePosition.copy(airplane.position); // Guarda posição para o próximo frame
-  updateTerrain(airplane.position); // Verifica terreno infinito
-
-  // Luz segue o avião (para sombras funcionarem sempre)
-  dirLight.position.x = airplane.position.x + 50;
-  dirLight.position.z = airplane.position.z + 50;
-  dirLight.target = airplane;
-
+  previousPlanePosition.copy(airplane.position);
   renderer.render(scene, camera);
 }
-animate();
 
-//Adicionar Raycast (Adicionar Objetivo ao clicar no terreno)
+initHUD();
+animate();
