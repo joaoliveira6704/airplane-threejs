@@ -71,7 +71,7 @@ scene.environment = texture; // O céu reflete nos materiais metálicos
 
 // Iluminação
 scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.8); // Sol
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.8); // Sol (Simulação)
 dirLight.position.set(50, 500, 50);
 dirLight.castShadow = true;
 
@@ -222,11 +222,11 @@ updateDependentParts();
 scene.add(airplane);
 
 // =========================================================
-// 5. SISTEMA DE TERRENO INFINITO
+// 4. SISTEMA DE TERRENO INFINITO
 // =========================================================
 const TERRAIN_SIZE = 1000;
 const TERRAIN_SEGMENTS = 40;
-const chunks = []; // Armazena os blocos de terreno
+const chunks = []; // Armazena os chunks de terreno
 
 // Textura do chão
 const texLoader = new THREE.TextureLoader();
@@ -250,7 +250,7 @@ function getTerrainHeight(x, z) {
   return y - 40; // Baixa o terreno para não bater no avião logo de início
 }
 
-// Cria um "chunk" (bloco) de terreno
+// Cria um chunk de terreno
 function createChunk(offsetX, offsetZ) {
   const geometry = new THREE.PlaneGeometry(
     TERRAIN_SIZE,
@@ -321,7 +321,7 @@ function updateTerrain(planePos) {
 }
 
 // =========================================================
-// 6. INTERFACE (GUI)
+// 5. INTERFACE (GUI)
 // =========================================================
 const gui = new GUI({ title: "Configurações" });
 const fBuild = gui.addFolder("Montagem");
@@ -338,7 +338,7 @@ fCtrl.add(config, "enginePower", 15, 100).name("Potência %");
 fCtrl.add(config, "wireframe").onChange((v) => (matBody.wireframe = v));
 
 // =========================================================
-// 7. LÓGICA DE CONTROLO
+// 6. LÓGICA DE CONTROLO
 // =========================================================
 const keys = { q: false, e: false, a: false, d: false, w: false, s: false };
 let isFirstPerson = false;
@@ -350,7 +350,7 @@ window.addEventListener("keydown", (ev) => {
     keys[ev.key.toLowerCase()] = true;
   if (ev.key.toLowerCase() === "c") {
     isFirstPerson = !isFirstPerson;
-    controls.enabled = !isFirstPerson; // Desativa OrbitControls na 1ª pessoa
+    controls.enabled = !isFirstPerson; // Desativa OrbitControls na primeira pessoa
   }
 });
 window.addEventListener("keyup", (ev) => {
@@ -374,7 +374,7 @@ window.addEventListener("resize", () => {
 });
 
 // =========================================================
-// 8. LÓGICA DE COLISÃO ATUALIZADA
+// 7. LÓGICA DE COLISÃO ATUALIZADA
 // =========================================================
 // --- SISTEMA DE PARTÍCULAS (FOGO E FUMO) ---
 const particles = [];
@@ -438,7 +438,6 @@ function checkCollision() {
   if (airplane.position.y < currentTerrainHeight + 0.5) {
     isCrashed = true;
 
-    // --- NOVO: Gatilho da Explosão ---
     createExplosion(airplane.position);
 
     config.enginePower = 0;
@@ -492,11 +491,11 @@ const mouse = new THREE.Vector2();
 let currentGoal = null;
 
 const goalMaterial = new THREE.MeshBasicMaterial({
-  color: 0x00ff00,
+  color: 0x01ff59,
   side: THREE.DoubleSide,
 });
 // Anel
-const goalGeometry = new THREE.TorusGeometry(5, 0.4, 16, 100);
+const goalGeometry = new THREE.TorusGeometry(15, 0.8, 16, 100);
 
 window.addEventListener("mousedown", (event) => {
   mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -545,7 +544,7 @@ function checkGoalCollection() {
 
       console.log("Objetivo concluído!");
 
-      // Feedback visual (avião brilha)
+      // Feedback visual
       matBody.emissive.set(0x00ff00);
       setTimeout(() => matBody.emissive.set(0x000000), 500);
 
@@ -559,7 +558,7 @@ function checkGoalCollection() {
 const clock = new THREE.Clock();
 let lastPos = new THREE.Vector3();
 
-// Atualizar Telemetria (hud, data boxes e heading tape)
+// Atualizar Telemetria (hud, data boxes e hdg tape)
 function updateTelemetry() {
   const euler = new THREE.Euler().setFromQuaternion(airplane.quaternion, "YXZ");
   const pitchDeg = THREE.MathUtils.radToDeg(euler.x);
@@ -584,17 +583,22 @@ function updateTelemetry() {
   const disk = document.getElementById("horizon-disk");
   disk.style.transform = `rotate(${-rollDeg}deg) translateY(${pitchMove}px)`;
 
-  // Atualizar Velocidade e altitude
+  // Atualizar Velocidade e altitude (Relativa ao chão)
   const dt = clock.getDelta();
   if (dt > 0) {
     const dist = airplane.position.distanceTo(lastPos);
-    document.getElementById("speedVal").innerText = Math.round((dist / dt) * 5);
+    document.getElementById("speedVal").innerText =
+      Math.round((dist / dt) * 2) + " kts";
   }
   lastPos.copy(airplane.position);
-  document.getElementById("altVal").innerText = Math.round(airplane.position.y);
+  document.getElementById("altVal").innerText =
+    Math.round(
+      airplane.position.y -
+        getTerrainHeight(airplane.position.x, airplane.position.z)
+    ) + " ft";
 }
 
-// Inicialização do HUD (telemetria)
+// Inicialização do HUD
 function initHUD() {
   const hdgTape = document.getElementById("heading-tape");
   const pitchLadder = document.getElementById("pitch-ladder");
@@ -609,7 +613,7 @@ function initHUD() {
     }
   }
 
-  // Gerar números para pitch - 90º em 90º
+  // Gerar números para pitch -90º a 90º
   for (let i = -90; i <= 90; i += 10) {
     if (i === 0) continue;
     const line = document.createElement("div");
@@ -622,6 +626,8 @@ function initHUD() {
   }
 }
 
+let gForceEffect = 0;
+
 function animate() {
   requestAnimationFrame(animate);
 
@@ -633,7 +639,7 @@ function animate() {
   if (!isCrashed) {
     checkGoalCollection();
     objectiveLabel.innerText = objectiveCount;
-    // --- 1. PROCESSAR INPUTS ---
+    // --- PROCESSAR INPUTS ---
     let tRoll = 0,
       tYaw = 0,
       tPitch = 0;
@@ -644,8 +650,8 @@ function animate() {
     if (keys.s) tPitch = 0.6; // Nariz cima
     if (keys.w) tPitch = -0.6; // Nariz baixo
 
-    // --- 2. FÍSICA E ROTAÇÃO DO AVIÃO ---
-    // Lerp (Linear Interpolation) para suavizar o movimento
+    // --- FÍSICA E ROTAÇÃO DO AVIÃO ---
+    // Lerp para suavizar o movimento
     roll = THREE.MathUtils.lerp(roll, tRoll, 0.04);
     yaw = THREE.MathUtils.lerp(yaw, tYaw, 0.04);
     pitch = THREE.MathUtils.lerp(pitch, tPitch, 0.04);
@@ -674,7 +680,7 @@ function animate() {
       ((roll * 0.03 * 2) / config.wingScale) * (config.enginePower / 30)
     ); // Consoante a potência e tamanho das asas, a autoridade dos ailerons muda
 
-    // --- 3. ANIMAÇÃO DAS PEÇAS MÓVEIS ---
+    // --- ANIMAÇÃO DAS PEÇAS MÓVEIS ---
     smoothAileron = THREE.MathUtils.lerp(smoothAileron, tRoll, 0.1);
     smoothRudder = THREE.MathUtils.lerp(smoothRudder, tYaw, 0.1);
     smoothElevator = THREE.MathUtils.lerp(smoothElevator, tPitch, 0.1);
@@ -684,7 +690,7 @@ function animate() {
     rudder.rotation.y = -smoothRudder;
     elevator.rotation.x = -smoothElevator;
 
-    // --- 4. FÍSICA DE MOVIMENTO ---
+    // --- FÍSICA DE MOVIMENTO ---
     const power = config.enginePower / 100;
     propellerGroup.rotation.z += -0.2 - power; // Rodar hélice
 
@@ -698,13 +704,25 @@ function animate() {
       airplane.position.add(forward.multiplyScalar(speed)); // Move o avião nessa direção
     }
 
-    // --- 5. LÓGICA DE CÂMARA ---
+    // --- LÓGICA DE CÂMARA ---
     if (isFirstPerson) {
-      // Câmara "colada" ao cockpit
-      const cockpitOffset = new THREE.Vector3(0, 1, -3);
-      const targetPos = cockpitOffset.applyMatrix4(airplane.matrixWorld);
-      camera.position.lerp(targetPos, 0.5);
-      camera.quaternion.copy(airplane.quaternion); // Copia rotação do avião
+      const targetG = (config.enginePower / 100) * 0.5;
+
+      // Suavizamos a transição para não ser instantâneo
+      gForceEffect = THREE.MathUtils.lerp(gForceEffect, targetG, 0.1);
+
+      // Posição base do cockpit
+      // Cálculo para a posição (z) no cockpit não alterar consoante a potência
+      const cockpitBasePos = new THREE.Vector3(
+        0,
+        1.06,
+        -0.6 - gForceEffect * 4
+      );
+
+      const finalCameraPos = cockpitBasePos.applyMatrix4(airplane.matrixWorld);
+
+      camera.position.copy(finalCameraPos);
+      camera.quaternion.copy(airplane.quaternion);
     } else {
       // Câmara de perseguição (OrbitControls manual)
       const planeDelta = new THREE.Vector3().subVectors(
@@ -716,9 +734,9 @@ function animate() {
       controls.update();
     }
 
-    // --- 6. ATUALIZAÇÕES FINAIS ---
+    // --- ATUALIZAÇÕES FINAIS ---
     previousPlanePosition.copy(airplane.position); // Guarda posição para o próximo frame
-    updateTerrain(airplane.position); // Verifica terreno infinito
+    updateTerrain(airplane.position);
 
     // Luz segue o avião
     dirLight.position.set(
