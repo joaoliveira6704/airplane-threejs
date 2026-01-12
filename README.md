@@ -2,6 +2,9 @@
 
 Um simulador de voo interativo desenvolvido em JavaScript com Three.js, que oferece física realista, terreno procedural infinito e um sistema de objetivos.
 
+Número de Aluno: 40240391
+Nome: João Pedro Teixeira Oliveira
+
 ## 📋 Índice
 
 - [Características](#características)
