@@ -172,8 +172,6 @@ São necessárias 6 imagens PNG para formar o cubo do céu:
 
 ### Bibliotecas Three.js
 
-Importadas via CDN:
-
 - `three` - Biblioteca principal
 - `OrbitControls` - Controlos de câmara
 - `lil-gui` - Interface de configuração
