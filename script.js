@@ -17,11 +17,6 @@ const config = {
   wireframe: false, // Modo de wireframe
 };
 
-// Dados de Telemetria
-let pitchVal = 0;
-let rollVal = 0;
-let hdgVal = 0;
-
 // Offsets para ajustar o pivot das peças móveis
 const OFFSET_AILERON = 0.8;
 const OFFSET_RUDDER = 0.6;
@@ -568,9 +563,6 @@ function updateTelemetry() {
   // Update dos valores
   document.getElementById("pitch-readout").innerText =
     Math.round(pitchDeg) + "°";
-  document.getElementById("pitchVal").innerText = Math.round(pitchDeg);
-  document.getElementById("rollVal").innerText = Math.round(rollDeg);
-  document.getElementById("headingVal").innerText = Math.round(headingDeg);
 
   // Atualizar heading
   const hdgOffset = -(headingDeg * 6);
